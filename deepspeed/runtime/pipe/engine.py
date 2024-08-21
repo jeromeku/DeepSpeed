@@ -441,10 +441,10 @@ class PipelineEngine(DeepSpeedEngine):
         )
         ###
 
-        with torch.cuda.nvtx.range("DEEPSPEED_TRAIN_BATCH_SCHEDULE"):
+        with torch.cuda.nvtx.range("DEEPSPEED_PipelineEngine.train_batch:TrainSchedule"):
             self._exec_schedule(sched)
 
-        with torch.cuda.nvtx.range("DEEPSPEED_TRAIN_BATCH_LOSS"):
+        with torch.cuda.nvtx.range("DEEPSPEED_PipelineEngine.train_batch:aggregate_loss"):
             with torch.no_grad():
                 self.agg_train_loss = self._aggregate_total_loss()
 
@@ -567,12 +567,12 @@ class PipelineEngine(DeepSpeedEngine):
         # prevent dead-lock with multiple evals sequence
         dist.barrier()
 
-        with torch.cuda.nvtx.range("DEEPSPEED_EVAL_INFERENCE_SCHEDULE"):
+        with torch.cuda.nvtx.range("DEEPSPEED_PipelineEngine.eval_batch:InferenceSchedule"):
             with torch.no_grad():
                 self._exec_schedule(sched)
 
         if self.is_last_stage():
-            with torch.cuda.nvtx.range("DEEPSPEED_EVAL_REDUCE_OUTPUT"):
+            with torch.cuda.nvtx.range("DEEPSPEED_PipelineEngine.eval_batch:reduce_output"):
                 eval_output = self._reduce_outputs(
                     self.fwd_outputs, reduce=reduce_output, micro_batches=micro_batches
                 )
@@ -1641,7 +1641,7 @@ class PipelineEngine(DeepSpeedEngine):
                 logger.info(
                     f"DEEPSPEED_DEBUG: RANK={rank} {self.__class__.__name__} executing schedule {schedule_type} instruction {type(cmd)} {cmd} {self._INSTRUCTION_MAP[type(cmd)]}"
                 )
-                annotation= f"DEEPSPEED_{rank}_{schedule_type}_{cmd}"
+                annotation= f"DEEPSPEED_PipelineEngine.exec_schedule_{schedule_type}_{cmd}"
                 ###
                 
                 self._exec_instr = MethodType(self._INSTRUCTION_MAP[type(cmd)], self)

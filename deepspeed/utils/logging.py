@@ -5,8 +5,8 @@
 
 import functools
 import logging
-import sys
 import os
+import sys
 
 log_levels = {
     "debug": logging.DEBUG,
@@ -35,7 +35,7 @@ class LoggerFactory:
             raise ValueError("name for logger cannot be None")
 
         formatter = logging.Formatter("[%(asctime)s] [%(levelname)s] "
-                                      "[%(filename)s:%(lineno)d:%(funcName)s] %(message)s")
+                                      "[%(pathname)s:%(lineno)d:%(funcName)s] %(message)s")
 
         logger_ = logging.getLogger(name)
         logger_.setLevel(level)

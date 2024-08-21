@@ -429,6 +429,8 @@ class PipelineEngine(DeepSpeedEngine):
             stages=self.num_stages,
             stage_id=self.stage_id,
         )
+        
+        ## Deepspeed debugging
         num_micro_batches = sched.num_micro_batches
         num_stages = sched.num_stages
         num_buffers = sched.num_pipe_buffers
@@ -437,11 +439,14 @@ class PipelineEngine(DeepSpeedEngine):
         logger.info(
             f"DEEPSPEED_DEBUG: train_batch: Executing pipeline schedule: {sched} stage_id={stage_id} micro_batches={num_micro_batches} buffers={num_buffers} stages={num_stages}"
         )
-        with torch.cuda.nvtx.range("DEEPSPEED_TRAIN_BATCH"):
+        ###
+
+        with torch.cuda.nvtx.range("DEEPSPEED_TRAIN_BATCH_SCHEDULE"):
             self._exec_schedule(sched)
 
-        with torch.no_grad():
-            self.agg_train_loss = self._aggregate_total_loss()
+        with torch.cuda.nvtx.range("DEEPSPEED_TRAIN_BATCH_LOSS"):
+            with torch.no_grad():
+                self.agg_train_loss = self._aggregate_total_loss()
 
         self.timers(TRAIN_BATCH_TIMER).stop()
 
@@ -562,16 +567,19 @@ class PipelineEngine(DeepSpeedEngine):
         # prevent dead-lock with multiple evals sequence
         dist.barrier()
 
-        with torch.no_grad():
-            self._exec_schedule(sched)
+        with torch.cuda.nvtx.range("DEEPSPEED_EVAL_INFERENCE_SCHEDULE"):
+            with torch.no_grad():
+                self._exec_schedule(sched)
 
         if self.is_last_stage():
-            eval_output = self._reduce_outputs(
-                self.fwd_outputs, reduce=reduce_output, micro_batches=micro_batches
-            )
+            with torch.cuda.nvtx.range("DEEPSPEED_EVAL_REDUCE_OUTPUT"):
+                eval_output = self._reduce_outputs(
+                    self.fwd_outputs, reduce=reduce_output, micro_batches=micro_batches
+                )
 
         if compute_loss and (bcast_loss or self.monitor.enabled):
-            eval_output = self._bcast_pipe_scalar(eval_output)
+            with torch.cuda.nvtx.range("DEEPSPEED_EVAL_BCAST_LOSS"):
+                eval_output = self._bcast_pipe_scalar(eval_output)
 
         if self.global_rank == 0 and self.monitor.enabled:
             self.summary_events = [
@@ -1627,13 +1635,17 @@ class PipelineEngine(DeepSpeedEngine):
                     )
 
                 # Equivalent to: self._exec_forward_pass(buffer_id=0)
+                ## nsys profiling
                 rank = torch.distributed.get_rank()
+                schedule_type = pipe_schedule.__class__.__name__
                 logger.info(
-                    f"DEEPSPEED_DEBUG: RANK={rank} {self.__class__.__name__} executing instruction {type(cmd)} {cmd} {self._INSTRUCTION_MAP[type(cmd)]}"
+                    f"DEEPSPEED_DEBUG: RANK={rank} {self.__class__.__name__} executing schedule {schedule_type} instruction {type(cmd)} {cmd} {self._INSTRUCTION_MAP[type(cmd)]}"
                 )
+                annotation= f"DEEPSPEED_{rank}_{schedule_type}_{cmd}"
+                ###
+                
                 self._exec_instr = MethodType(self._INSTRUCTION_MAP[type(cmd)], self)
                 
-                annotation= f"DEEPSPEED_TRAIN_BATCH_{rank}_{cmd}"
                 with torch.cuda.nvtx.range(annotation):
                     self._exec_instr(**cmd.kwargs)
 

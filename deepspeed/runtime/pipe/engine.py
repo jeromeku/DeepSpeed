@@ -11,7 +11,8 @@ import torch
 from deepspeed import comm as dist
 from deepspeed.accelerator import get_accelerator
 from deepspeed.runtime.bf16_optimizer import BF16_Optimizer
-from deepspeed.utils import instrument_w_nvtx, logger
+from deepspeed.utils import logger
+from deepspeed.utils.profiling import mark as profiler_mark
 from deepspeed.utils.timer import (
     BACKWARD_GLOBAL_TIMER,
     BACKWARD_INNER_GLOBAL_TIMER,
@@ -44,6 +45,7 @@ PIPE_SEND_OUTPUT_TIMER = "pipe_send_output"
 PIPE_SEND_GRAD_TIMER = "pipe_send_grad"
 PIPE_RECV_INPUT_TIMER = "pipe_recv_input"
 PIPE_RECV_GRAD_TIMER = "pipe_recv_grad"
+
 
 
 def is_even(number):
@@ -441,10 +443,10 @@ class PipelineEngine(DeepSpeedEngine):
         )
         ###
 
-        with torch.cuda.nvtx.range("DEEPSPEED_PipelineEngine.train_batch:TrainSchedule"):
+        with profiler_mark("DEEPSPEED_PipelineEngine.train_batch:TrainSchedule"):
             self._exec_schedule(sched)
 
-        with torch.cuda.nvtx.range("DEEPSPEED_PipelineEngine.train_batch:aggregate_loss"):
+        with profiler_mark("DEEPSPEED_PipelineEngine.train_batch:aggregate_loss"):
             with torch.no_grad():
                 self.agg_train_loss = self._aggregate_total_loss()
 
@@ -567,18 +569,18 @@ class PipelineEngine(DeepSpeedEngine):
         # prevent dead-lock with multiple evals sequence
         dist.barrier()
 
-        with torch.cuda.nvtx.range("DEEPSPEED_PipelineEngine.eval_batch:InferenceSchedule"):
+        with profiler_mark("DEEPSPEED_PipelineEngine.eval_batch:InferenceSchedule"):
             with torch.no_grad():
                 self._exec_schedule(sched)
 
         if self.is_last_stage():
-            with torch.cuda.nvtx.range("DEEPSPEED_PipelineEngine.eval_batch:reduce_output"):
+            with profiler_mark("DEEPSPEED_PipelineEngine.eval_batch:reduce_output"):
                 eval_output = self._reduce_outputs(
                     self.fwd_outputs, reduce=reduce_output, micro_batches=micro_batches
                 )
 
         if compute_loss and (bcast_loss or self.monitor.enabled):
-            with torch.cuda.nvtx.range("DEEPSPEED_EVAL_BCAST_LOSS"):
+            with profiler_mark("DEEPSPEED_EVAL_BCAST_LOSS"):
                 eval_output = self._bcast_pipe_scalar(eval_output)
 
         if self.global_rank == 0 and self.monitor.enabled:
@@ -1646,7 +1648,7 @@ class PipelineEngine(DeepSpeedEngine):
                 
                 self._exec_instr = MethodType(self._INSTRUCTION_MAP[type(cmd)], self)
                 
-                with torch.cuda.nvtx.range(annotation):
+                with profiler_mark(annotation):
                     self._exec_instr(**cmd.kwargs)
 
     def get_additional_losses(self):

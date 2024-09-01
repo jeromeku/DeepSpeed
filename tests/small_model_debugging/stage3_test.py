@@ -77,9 +77,19 @@ def test_driver():
             "optimizer": {
                 "type": "Adam",
                 "params": {
-                    "lr": 1.0
+                    "lr": 1e-4
                 }
             },
+            "fp16": {
+                "enabled": True,
+                # "auto_cast": false,
+                "loss_scale": 0,
+                "initial_scale_power": 0,
+                # "loss_scale_window": 1000,
+                # "hysteresis": 2,
+                # "consecutive_hysteresis": false,
+                # "min_loss_scale": 1
+}
         }
     
     # breakpoint()
@@ -96,8 +106,8 @@ def test_driver():
         device = "cuda"
     print(f"DEBUG: Is dist initialized: {dist.is_initialized()} {dist.get_world_size()} {dist.get_rank()}")
     print(f"DEBUG: {model.optimizer.fp16_groups}")        
-    test_input = torch.rand(1, model.input_dim, dtype=torch.half, device=device)
-    grad_output = torch.rand(1, model.output_dim, dtype=torch.half, device=device)
+    test_input = torch.randn(1, model.input_dim, dtype=torch.half, device=device)
+    grad_output = torch.randn(1, model.output_dim, dtype=torch.half, device=device)
 
     grad_output.requires_grad = False
     test_input.requires_grad = False
@@ -110,10 +120,13 @@ def test_driver():
     for _ in range(5):
         model.tput_timer.start()
         output = model(test_input)    
+        print(f"DEBUG OUTPUT: {output.abs().max()} {output.sum()}")
         model.backward(output.sum())
-        model.step()
+        print(f"DEBUG GRAD_NORM: {model.optimizer._get_norm_groups()}")
         print(f"DEBUG: {model.optimizer.averaged_gradients}")
         print(f"DEBUG: AVERAGED GRADIENTS: {model.optimizer.averaged_gradients}")
+        model.step()
+     
         model.tput_timer.stop(global_step=True)
     # print(f"THROUGHPUT: {model.tput_timer.avg_samples_per_sec():.3f} samples/sec")
     

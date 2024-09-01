@@ -1570,6 +1570,7 @@ class DeepSpeedEngine(Module):
 
                 log_dist(f'Creating {model_dtype} ZeRO stage {zero_stage} optimizer', ranks=[0])
                 from deepspeed.runtime.zero.stage3 import DeepSpeedZeroOptimizer_Stage3
+                breakpoint()
                 optimizer = DeepSpeedZeroOptimizer_Stage3(
                     self.module,
                     optimizer,
@@ -1929,7 +1930,6 @@ class DeepSpeedEngine(Module):
             retain_graph: bool, default: false
                 forward on user defined choice of retain_graph
         """
-
         see_memory_usage("Engine before backward", force=self.memory_breakdown())
 
         if self.scale_wrt_gas is not None:

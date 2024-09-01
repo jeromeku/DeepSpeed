@@ -18,7 +18,7 @@ from torch import Tensor
 from deepspeed import comm as dist
 from torch.nn import Module
 from torch.nn import Parameter
-
+from deepspeed.utils.logging import logger
 from .linear import zero3_linear_wrap
 
 from deepspeed.utils import groups
@@ -95,10 +95,20 @@ def _dist_allgather_fn(input_tensor: Tensor, output_tensor: Tensor, group=None):
     return instrument_w_nvtx(dist.allgather_fn)(output_tensor, input_tensor, group=group, async_op=True)
 
 
-def print_rank_0(message, debug=False, force=False):
+def print_rank_0(message, verbose=True, debug=True, force=False):
     rank = dist.get_rank()
     if rank == 0 and (debug or force):
-        print(message)
+        if verbose:
+            import inspect
+            caller_frame = inspect.stack()[1]
+            
+            # Get the file name and line number from the frame
+            file_name = caller_frame.filename
+            line_number = caller_frame.lineno
+            message = f"{file_name}:{line_number}: {message}"
+        print(message, flush=True)
+        # if log_also:
+        #     logger.info(message)
     # other variations
     # - print for all ranks w/o interleaving
     # printflock(f"[{rank}] {message}")
@@ -1181,7 +1191,8 @@ class Init(InsertPostInitMethodToModuleSubClasses):
         def all_gather_coalesced(params: Iterable[Parameter],
                                  safe_mode: bool = False,
                                  quantize: bool = False) -> AllGatherCoalescedHandle:
-
+            print_rank_0(f"all_gather_coalesced: {params}")
+            print_rank_0(f"{[p.ds_summary() for p in params]}")
             # fetches from nvme if the partition is not available and in nvme
             self._ensure_availability_of_partitioned_params(params)
 
@@ -1482,7 +1493,8 @@ class Init(InsertPostInitMethodToModuleSubClasses):
 
         # fetches from nvme if the partition is not available and in nvme
         self._ensure_availability_of_partitioned_params(param_list)
-
+        print_rank_0(f"all_gather_coalesced: {param_list}")
+        print_rank_0(f"{[p.ds_summary() for p in param_list]}")
         handles = []
         all_gather_list = []
         for param in param_list:

@@ -245,7 +245,7 @@ class ThroughputTimer:
         self.micro_step_count += 1
         if global_step:
             self.global_step_count += 1
-
+        print(f"DEBUG TIMER START: {self.start_time} {self.global_step_count} {self.micro_step_count} {global_step} {report_speed} {self.logging}")
         if self.start_time > 0:
             if self.config.synchronized:
                 get_accelerator().synchronize()
@@ -255,6 +255,7 @@ class ThroughputTimer:
             self.step_elapsed_time += duration
 
             if global_step:
+                
                 if report_speed and self.global_step_count % self.steps_per_output == 0:
                     self.logging(
                         "epoch={}/micro_step={}/global_step={}, RunningAvgSamplesPerSec={}, CurrSamplesPerSec={}, "

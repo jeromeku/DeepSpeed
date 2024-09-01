@@ -397,7 +397,7 @@ def parse_num_nodes(str_num_nodes: str, elastic_training: bool):
 
 def main(args=None):
     args = parse_args(args)
-
+    
     if args.elastic_training:
         assert args.master_addr != "", "Master Addr is required when elastic training is enabled"
 

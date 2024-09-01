@@ -356,7 +356,7 @@ class DeepSpeedZeroOptimizer_Stage3(ZeROOptimizer):
                     largest_partitioned_param_numel,
                     max([max(tensor.numel(), tensor.ds_numel) for tensor in fp16_partitioned_group]))
 
-        print_rank_0(f'Largest partitioned param numel = {largest_partitioned_param_numel}', force=False)
+        print_rank_0(f'Largest partitioned param numel = {largest_partitioned_param_numel}', force=True)
 
         self._setup_for_real_optimizer()
         self.grad_position = {}
@@ -1836,6 +1836,8 @@ class DeepSpeedZeroOptimizer_Stage3(ZeROOptimizer):
     def _get_norm_groups(self):
         norm_groups = []
         for i, group in enumerate(self.fp16_groups):
+            print(f"Group {i} {group}")
+            print(f"{self.averaged_gradients}")
             if self.offload_optimizer:
                 norm_groups.append(self.complete_grad_norm_calculation_for_cpu_offload(self.fp16_groups[i]))
             else:

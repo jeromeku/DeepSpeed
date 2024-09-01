@@ -768,8 +768,8 @@ def empty_cache():
     get_accelerator().reset_peak_memory_stats()
 
 
-def see_memory_usage(message, force=False):
-    if not force:
+def see_memory_usage(message, force=True, debug=True):
+    if not force and not debug:
         return
     if dist.is_initialized() and not dist.get_rank() == 0:
         return

@@ -18,7 +18,7 @@ from torch import Tensor
 from deepspeed import comm as dist
 from torch.nn import Module
 from torch.nn import Parameter
-
+from deepspeed.utils.debug import log_rank_file
 from .linear import zero3_linear_wrap
 
 from deepspeed.utils import groups
@@ -95,10 +95,10 @@ def _dist_allgather_fn(input_tensor: Tensor, output_tensor: Tensor, group=None):
     return instrument_w_nvtx(dist.allgather_fn)(output_tensor, input_tensor, group=group, async_op=True)
 
 
-def print_rank_0(message, debug=False, force=False):
+def print_rank_0(message, debug=False, force=True):
     rank = dist.get_rank()
     if rank == 0 and (debug or force):
-        print(message)
+        print(f"DEBUG!!!: {__file__}: {message}")
     # other variations
     # - print for all ranks w/o interleaving
     # printflock(f"[{rank}] {message}")
@@ -1064,11 +1064,11 @@ class Init(InsertPostInitMethodToModuleSubClasses):
 
     def _post_init_method(self, module):
         #see_memory_usage(f"Before converting params in {module.__class__.__name__}", force=False)
-        print_rank_0(f'Converting Params in {module.__class__.__name__}', force=False)
-        see_memory_usage(f"Before converting and partitioning params in {module.__class__.__name__}", force=False)
+        print_rank_0(f'Converting Params in {module.__class__.__name__}', force=True)
+        see_memory_usage(f"Before converting and partitioning params in {module.__class__.__name__}", force=True)
 
         for name, param in module.named_parameters(recurse=False):
-            print_rank_0(f'Analyzing param {name} in {module.__class__.__name__}', force=False)
+            print_rank_0(f'Analyzing param {name} in {module.__class__.__name__}', force=True)
             InsertPostInitMethodToModuleSubClasses.num_module_parameters += 1
             InsertPostInitMethodToModuleSubClasses.num_module_elements += param.numel()
             if not is_zero_param(param):
@@ -1084,7 +1084,7 @@ class Init(InsertPostInitMethodToModuleSubClasses):
 
         see_memory_usage(
             f"Param count {InsertPostInitMethodToModuleSubClasses.num_module_elements}. After converting and partitioning params in {module.__class__.__name__}",
-            force=False)
+            force=True)
 
     def _convert_to_deepspeed_param(self, param):
 
@@ -1137,6 +1137,7 @@ class Init(InsertPostInitMethodToModuleSubClasses):
         Init.param_id += 1
 
         def all_gather(param_list=None, async_op=False, hierarchy=0):
+            log_rank_file(dist.get_rank(), f"ALLGATHER {debug_param2name_id_shape(param)}")
             cls = param
             if param_list is None:
                 param_list = [cls]
@@ -1189,6 +1190,8 @@ class Init(InsertPostInitMethodToModuleSubClasses):
                 return _no_gather_coalesced(params)
 
             for param in params:
+                log_rank_file(dist.get_rank(), f"ALLGATHER_COALESCED {debug_param2name_id_shape(param)}")
+
                 if param.ds_status != ZeroParamStatus.NOT_AVAILABLE:
                     raise RuntimeError(param.ds_summary())
                 param.ds_status = ZeroParamStatus.INFLIGHT
@@ -1369,7 +1372,7 @@ class Init(InsertPostInitMethodToModuleSubClasses):
         def partition(param_list=None, hierarchy=0, has_been_updated=False):
             cls = param
             print_rank_0(f"{'--'*hierarchy}----Partitioning param {debug_param2name_id_shape_device(cls)}",
-                         force=False)
+                         force=True)
             if param_list is None:
                 param_list = [cls]
             self._partition(param_list, has_been_updated=has_been_updated)
@@ -1518,7 +1521,7 @@ class Init(InsertPostInitMethodToModuleSubClasses):
 
     def _partition(self, param_list, force=False, has_been_updated=False):
         for param in param_list:
-            print_rank_0(f"Before Partitioning Param {param.ds_id}", force=False)
+            print_rank_0(f"Before Partitioning Param {param.ds_id}", force=True)
             if self.zero_param_process_group is not None:
                 self._partition_param_sec(param)
             self._partition_param(param, has_been_updated=has_been_updated)
@@ -1532,9 +1535,9 @@ class Init(InsertPostInitMethodToModuleSubClasses):
     def _partition_param(self, param, buffer=None, has_been_updated=False):
         assert param.ds_status is not ZeroParamStatus.INFLIGHT, f" {param} Cannot partition a param in flight"
         global reuse_buffers
-        print_rank_0(f"Param id {param.ds_id} status is {param.ds_status}", force=False)
+        print_rank_0(f"Param id {param.ds_id} status is {param.ds_status}", force=True)
         if param.ds_status is ZeroParamStatus.AVAILABLE:
-            print_rank_0(f"Partitioning param id {param.ds_id} reuse buffers {reuse_buffers}", force=False)
+            print_rank_0(f"Partitioning param id {param.ds_id} reuse buffers {reuse_buffers}", force=True)
             # if reuse_buffers and False:
             #     numel = buffer.numel()
             #     buffer = param.data.view(-1)
@@ -1552,17 +1555,17 @@ class Init(InsertPostInitMethodToModuleSubClasses):
                 #print_rank_0(f"Param  {param.ds_id} pri {param.ds_tensor.size()}  loc? {param.ds_tensor.final_location}", force=True)
                 #param.data = param.ds_tensor.data
 
-                see_memory_usage(f'Before partitioning param {param.ds_id} {param.shape}', force=False)
+                see_memory_usage(f'Before partitioning param {param.ds_id} {param.shape}', force=True)
                 # param.data does not store anything meaningful in partitioned state
                 free_param(param)
-                see_memory_usage(f'After partitioning param {param.ds_id} {param.shape}', force=False)
+                see_memory_usage(f'After partitioning param {param.ds_id} {param.shape}', force=True)
 
                 if param.ds_tensor.final_location == OffloadDeviceEnum.nvme:
-                    print_rank_0(f"Param {param.ds_id} partition released since it exists in nvme", force=False)
+                    print_rank_0(f"Param {param.ds_id} partition released since it exists in nvme", force=True)
                     param.nvme_swapper.remove_partition_and_release_buffers([param])
                     print_rank_0(
                         f"after swap Param {param.ds_id} {param.ds_tensor.shape} partition released since it exists in nvme",
-                        force=False)
+                        force=True)
 
                 return
 
@@ -1638,9 +1641,9 @@ class Init(InsertPostInitMethodToModuleSubClasses):
 
             # param.data does not store anything meaningful in partitioned state
 
-            see_memory_usage(f'Before partitioning param {param.ds_id} {param.shape}', force=False)
+            see_memory_usage(f'Before partitioning param {param.ds_id} {param.shape}', force=True)
             free_param(param)
-            see_memory_usage(f'After partitioning param {param.ds_id} {param.shape}', force=False)
+            see_memory_usage(f'After partitioning param {param.ds_id} {param.shape}', force=True)
 
             if param.ds_tensor.final_location == OffloadDeviceEnum.nvme:
                 self.param_swapper.swap_out_and_release([param])
@@ -1721,16 +1724,16 @@ class Init(InsertPostInitMethodToModuleSubClasses):
         assert tensor_size == aligned_param_size, f'param id {param.ds_id} aligned size {aligned_param_size} does not match tensor size {tensor_size}'
 
         print_rank_0(
-            f"{'--'* hierarchy}---- Before allocating allgather param {debug_param2name_id_shape_status(param)} partition size={partition_size}"
+            f"{'--'* hierarchy}---- Before allocating allgather param {debug_param2name_id_shape_status(param)} partition size={partition_size}", force=True
         )
 
         see_memory_usage(
             f'Before allocate allgather param {debug_param2name_id_shape_status(param)} partition_size={partition_size} ',
-            force=False)
+            force=True)
         flat_tensor = torch.zeros(aligned_param_size, dtype=param.dtype, device=param.device).view(-1)
         see_memory_usage(
             f'After allocate allgather param {debug_param2name_id_shape_status(param)} {aligned_param_size} {partition_size} ',
-            force=False)
+            force=True)
 
         if not get_accelerator().resolves_data_dependency():
             get_accelerator().synchronize()

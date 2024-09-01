@@ -668,7 +668,7 @@ def init_distributed(dist_backend=None,
                 utils.logger.info('Initializing TorchBackend in DeepSpeed with backend {}'.format(dist_backend))
             # Create a torch backend object, initialize torch distributed, and assign to cdb
             cdb = TorchBackend(dist_backend, timeout, init_method, rank, world_size)
-
+            utils.logger.info(f"cdb={cdb}")
 
 def mpi_discovery(distributed_port=TORCH_DISTRIBUTED_DEFAULT_PORT, verbose=True):
     '''

@@ -139,21 +139,26 @@ def init_wandb(project="grads", group_name="test", name="tensor_fragment", entit
             )
     return run
 
-def collect_grads(model, step, grad_types=["global"], flatten=True):
+def collect_grads(model, step, grad_types=["global"], flatten=True, debug=False):
     grad_dict = defaultdict(lambda: defaultdict(dict))
     for mod_name, mod in model.named_children():
         for param_name, param in mod.named_parameters():
             #   param_dict = {}
             # if len(param) > 0:
-            log_rank_file(dist.get_rank(), f"step {step}: {param_name} {param.ds_summary()}")
+            if debug:
+                log_rank_file(dist.get_rank(), f"step {step}: {param_name} {param.ds_summary()}")
            
             if "global" in grad_types:
                 global_grads = safe_get_full_grad(param)
-                log_rank_file(dist.get_rank(), f"global_grads at step {step}: {param_name} {global_grads}")
                 grad_dict[mod_name][param_name]["global"] = global_grads
+                
+                if debug:
+                    log_rank_file(dist.get_rank(), f"global_grads at step {step}: {param_name} {global_grads}")
+            
             if "local" in grad_types:
                 local_grads = safe_get_local_grad(param)
                 grad_dict[mod_name][param_name]["local"] = local_grads
+    
     return flatten_dict(grad_dict, parent_key=f"rank-{dist.get_rank()}") if flatten else grad_dict
 
 def flatten_dict(d, parent_key=None, sep='/'):

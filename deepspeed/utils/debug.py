@@ -2,7 +2,17 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # DeepSpeed Team
+import datetime
+import os
+import pdb
 
+import deepspeed.comm as dist
+
+BREAKPOINT_ENV_VAR="PYTHONBREAKPOINT"
+GLOBAL_LOG_DIR = "deepspeed_logs"
+
+log_dir = None
+fhandles = {}
 # For lazy import with printflock()
 fcntl = None
 
@@ -103,8 +113,11 @@ def printflock(*msgs):
 
 fh = None
 
-
-def log_rank_file(rank, *msgs):
+def set_breakpoint():
+    if os.environ.get(BREAKPOINT_ENV_VAR, "0") == "1":
+        pdb.set_trace()
+    
+def log_rank_file(rank, *msgs, log_path=None, mode='a'):
     """
     Print to a log file of the given rank
 
@@ -128,9 +141,38 @@ def log_rank_file(rank, *msgs):
         diff -u log_rank_0.txt log_rank_1.txt | less
 
     """
-    global fh
-    if fh is None:
-        fh = open(f"log_rank_{rank}.txt", "w")
+    global log_dir
+    global fhandles
+    
+    if log_dir is None:
+        ts = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M")
+        log_dir = os.path.join(GLOBAL_LOG_DIR, ts)
+        if not os.path.exists(log_dir) and dist.get_local_rank() == 0:
+            os.makedirs(log_dir, exist_ok=True)
+        dist.barrier()
+   
+    if log_path is None:
+        # global fh
+        # #get formatted time string to minute
+            
+        # if fh is None:
+        #     ts = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M")
+        #     log_dir = os.path.join(GLOBAL_LOG_DIR, ts)
+        #     if not os.path.exists(log_dir):
+        #         os.makedirs(log_dir)
+        log_path = os.path.join(log_dir, f"log_rank_{rank}.txt")
+        
+    else:
+        log_path = os.path.join(log_dir, log_path)
+    # if not os.path.exists(log_path):
+    #     os.makedirs(log_path, exist_ok=True)
+        # if 
+        # fh = open(os.path.join(GLOBAL_LOG_DIR, log_path), mode=mode)
+    if log_path not in fhandles:
+        fhandles[log_path] = open(log_path, mode=mode)        
+    
+    fh = fhandles[log_path]
+    
     for m in msgs:
         fh.write(f"{m}\n")
     fh.flush()

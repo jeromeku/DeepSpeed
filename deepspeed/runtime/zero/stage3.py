@@ -3,32 +3,51 @@
 
 # DeepSpeed Team
 
-import sys
-import gc
 import collections
+import gc
+import sys
 from typing import Deque, Dict, Tuple
-from deepspeed import comm as dist
-from deepspeed.utils import groups
 
 from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
+
+from deepspeed import comm as dist
+from deepspeed.accelerator import get_accelerator
+from deepspeed.checkpoint.constants import (
+    FP32_FLAT_GROUPS,
+    LOSS_SCALER,
+    OPTIMIZER_STATE_DICT,
+    PARTITION_COUNT,
+    ZERO_STAGE,
+)
+from deepspeed.ops.adam import DeepSpeedCPUAdam
 from deepspeed.runtime.base_optimizer import ZeROOptimizer
-from deepspeed.utils import logger
+from deepspeed.runtime.comm.coalesced_collectives import (
+    all_to_all_quant_reduce,
+    reduce_scatter_coalesced,
+)
 from deepspeed.runtime.fp16.loss_scaler import CreateLossScaler
-from deepspeed.runtime.comm.coalesced_collectives import reduce_scatter_coalesced, all_to_all_quant_reduce
-from deepspeed.runtime.utils import inf, get_global_norm, is_model_parallel_parameter, get_only_unique_item
-from deepspeed.runtime.zero.partition_parameters import *
+from deepspeed.runtime.swap_tensor.optimizer_utils import OptimizerSwapper
+from deepspeed.runtime.swap_tensor.partitioned_optimizer_swapper import (
+    PartitionedOptimizerSwapper,
+)
+from deepspeed.runtime.swap_tensor.partitioned_param_swapper import (
+    PartitionedParamStatus,
+)
+from deepspeed.runtime.swap_tensor.pipelined_optimizer_swapper import (
+    PipelinedOptimizerSwapper,
+)
+from deepspeed.runtime.utils import (
+    get_global_norm,
+    get_only_unique_item,
+    inf,
+    is_model_parallel_parameter,
+)
 from deepspeed.runtime.zero.config import ZeroStageEnum
 from deepspeed.runtime.zero.offload_config import OffloadDeviceEnum
 from deepspeed.runtime.zero.parameter_offload import DeepSpeedZeRoOffload
+from deepspeed.runtime.zero.partition_parameters import *
 from deepspeed.runtime.zero.utils import apply_to_tensors_only
-from deepspeed.ops.adam import DeepSpeedCPUAdam
-from deepspeed.runtime.swap_tensor.partitioned_param_swapper import PartitionedParamStatus
-from deepspeed.runtime.swap_tensor.optimizer_utils import OptimizerSwapper
-from deepspeed.runtime.swap_tensor.partitioned_optimizer_swapper import PartitionedOptimizerSwapper
-from deepspeed.runtime.swap_tensor.pipelined_optimizer_swapper import PipelinedOptimizerSwapper
-from deepspeed.checkpoint.constants import OPTIMIZER_STATE_DICT, FP32_FLAT_GROUPS, PARTITION_COUNT, ZERO_STAGE, LOSS_SCALER
-from deepspeed.accelerator import get_accelerator
-from deepspeed.utils import z3_leaf_parameter
+from deepspeed.utils import groups, logger, z3_leaf_parameter
 
 # Toggle this to true to enable correctness test
 # with gradient partitioning and without
@@ -312,7 +331,8 @@ class DeepSpeedZeroOptimizer_Stage3(ZeROOptimizer):
 
         # Trainable parameters
         self.trainable_param_groups = self._get_trainable_parameter_groups()
-
+        if os.environ.get("PYTHONBREAKPOINT","0") == "1":
+            import pdb; pdb.set_trace()
         see_memory_usage("Before creating fp16 partitions", force=True)
         self._create_fp16_partitions_with_defragmentation(self.trainable_param_groups)
         num_fp16_subgroups = len(self.fp16_partitioned_groups_flat)
@@ -2018,6 +2038,8 @@ class DeepSpeedZeroOptimizer_Stage3(ZeROOptimizer):
         """
             Not supporting closure.
         """
+        if os.environ.get("PYTHONBREAKPOINT","0") == "1":
+            import pdb; pdb.set_trace()
         self._pre_step()
         self._partition_all_parameters()
 

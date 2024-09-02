@@ -3,17 +3,18 @@
 
 # DeepSpeed Team
 
-import os
-import json
 import argparse
-import torch
+import json
+import os
 from collections import OrderedDict
 
-from deepspeed.pipe import PipelineModule, LayerSpec
-from deepspeed.moe.layer import MoE
-from deepspeed.accelerator import get_accelerator
+import torch
 
 import deepspeed.comm as dist
+from deepspeed.accelerator import get_accelerator
+from deepspeed.moe.layer import MoE
+from deepspeed.pipe import LayerSpec, PipelineModule
+
 from .common import preferred_dtype
 
 
@@ -270,8 +271,9 @@ def random_dataset(total_samples, hidden_dim, device, dtype=preferred_dtype()):
     return train_dataset
 
 
-def random_dataloader(model, total_samples, hidden_dim, device, dtype=preferred_dtype()):
-    batch_size = model.train_micro_batch_size_per_gpu()
+def random_dataloader(model, total_samples, hidden_dim, device, dtype=preferred_dtype(), batch_size=None):
+    #batch_size = model.train_micro_batch_size_per_gpu()
+    batch_size = batch_size or total_samples
     train_dataset = random_dataset(total_samples, hidden_dim, device, dtype=dtype)
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size)
     return train_loader

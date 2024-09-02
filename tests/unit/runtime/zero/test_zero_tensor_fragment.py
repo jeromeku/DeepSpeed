@@ -8,10 +8,12 @@ import sys
 sys.path.insert(0, "/home/jeromeku/DeepSpeed/tests")
 
 import json
+import os
 from collections import defaultdict
 
 import pytest
 import torch
+import wandb
 from unit.common import DistributedTest, preferred_dtype
 from unit.simple_model import SimpleModel, random_dataloader
 from unit.util import bf16_required_version_check
@@ -75,8 +77,6 @@ def validate_tensor(model, api_type, opt_states):
 class MyModel(torch.nn.Module):
     def __init__(self, hidden_dim, frozen_weights):
         super(MyModel, self).__init__()
-        self.act = torch.nn.ReLU()
-        self.cel = torch.nn.CrossEntropyLoss()
         self.linears = torch.nn.ModuleList(
             [
                 torch.nn.Linear(hidden_dim, 1),
@@ -84,6 +84,10 @@ class MyModel(torch.nn.Module):
                 torch.nn.Linear(1, hidden_dim),
             ]
         )
+        
+        self.act = torch.nn.ReLU()
+        self.cel = torch.nn.CrossEntropyLoss()
+     
         if frozen_weights:
             self.linears[0].weight.requires_grad = False
             self.linears[0].bias.requires_grad = False
@@ -118,14 +122,28 @@ def collect_grads(model, step, grad_types=["global", "local"]):
                     grad_dict[mod_name][param_name].setdefault(
                         "local", create_grad_dict(local_grads)
                     )
+    return grad_dict
+def flatten_dict(d, parent_key='', sep='.'):
+    items = []
+    for k, v in d.items():
+        new_key = f"{parent_key}{sep}{k}" if parent_key else k
+        if isinstance(v, dict):
+            items.extend(flatten_dict(v, new_key, sep=sep).items())
+        else:
+            items.append((new_key, v))
+    return dict(items)
 
-    rank = dist.get_rank()
-    key = f"{rank=}-{step=}"
-    keyed_grads = {key: grad_dict}  # {key: grad_dict}
+def log_grads(grad_dict, step, use_wandb=True):
+    if not use_wandb:
+        rank = dist.get_rank()
+        key = f"{rank=}-{step=}"
+        keyed_grads = {key: grad_dict}  # {key: grad_dict}
 
-    msg = json.dumps(keyed_grads, indent=4)
-    log_rank_file(rank, msg, log_path=f"rank-{rank}-grads.log")
-
+        msg = json.dumps(keyed_grads, indent=4)
+        log_rank_file(rank, msg, log_path=f"rank-{rank}-grads.log")
+    else:
+        wandb.log(grad_dict)
+        wandb.Histogram
 
 def run_fragmented_model(
     model, config_dict, hidden_dim, dtype, validate_after_bwd, validate_after_step
@@ -135,7 +153,7 @@ def run_fragmented_model(
         model=model, model_parameters=model.parameters(), config=config_dict
     )
 
-    print(f"DEBUG!!!: {dist.get_world_size()=}")
+
     data_loader = random_dataloader(
         model=model,
         total_samples=3,
@@ -446,17 +464,53 @@ class TestTensorFragmentUpdate(DistributedTest):
         run_fragmented_model(
             model, config_dict, hidden_dim, dtype, lambda _: None, validate_func
         )
+def init_wandb(project="grads", group_name="test", name="tensor_fragment", entity=None):
+    wandb.login(key=os.getenv("WANDB_API_KEY"))
+    wandb.init(
+                project=project,
+                group=group_name,
+                name=name,
+                save_code=False,
+                force=False,
+                entity=entity,
+            )
 
+def test_wandb(project="grads", group_name="test", name="tensor_fragment", entity=None):
+    init_wandb(project=project, group_name=group_name, name=name, entity=entity)
+    hidden_dim = 128
+    dtype = torch.float32
+    model = MyModel(128, False).to(device="cuda")
+    
+    data_loader = random_dataloader(
+        model=model,
+        total_samples=5,
+        hidden_dim=hidden_dim,
+        device="cuda",
+        dtype=dtype,
+        batch_size=1,
+    )
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+    
+    for n, batch in enumerate(data_loader):
+        loss = model(batch[0], batch[1])
+        #model.backward(loss)
+        loss.backward()
+        grad_dict = collect_grads(model, n)
+        flattened_grads = flatten_dict(grad_dict, parent_key = "rank0", sep="/")
+        print(f"grad dict {n} = {json.dumps(grad_dict, indent=4)}")
+        print(f"flattened grads {n} = {json.dumps(flattened_grads, indent=4)}")        
+        wandb.log(flattened_grads, step=n)
+        optimizer.step()
 
 if __name__ == "__main__":
-    test_suite = TestTensorFragmentGet()
-    import tempfile
+    test_wandb(name="wand_sanity_check")
+    # test_suite = TestTensorFragmentGet()
 
-    with open("test_tensor_fragment_get.log", "w") as tmpdir:
-        test_suite.test_zero_fragments(
-            tmpdir=tmpdir,
-            api_type="full",
-            zero_stage=3,
-            offload_device=OffloadDeviceEnum.none,
-            frozen_weights=False,
-        )
+    # with open("test_tensor_fragment_get.log", "w") as tmpdir:
+    #     test_suite.test_zero_fragments(
+    #         tmpdir=tmpdir,
+    #         api_type="full",
+    #         zero_stage=3,
+    #         offload_device=OffloadDeviceEnum.none,
+    #         frozen_weights=False,
+    #     )

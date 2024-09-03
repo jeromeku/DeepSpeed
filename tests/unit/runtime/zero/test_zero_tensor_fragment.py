@@ -84,10 +84,10 @@ class MyModel(torch.nn.Module):
                 torch.nn.Linear(1, hidden_dim),
             ]
         )
-        
+
         self.act = torch.nn.ReLU()
         self.cel = torch.nn.CrossEntropyLoss()
-     
+
         if frozen_weights:
             self.linears[0].weight.requires_grad = False
             self.linears[0].bias.requires_grad = False
@@ -98,6 +98,7 @@ class MyModel(torch.nn.Module):
             x = self.act(x)
         return self.cel(x, y)
 
+
 class DebugModel(torch.nn.Module):
     def __init__(self, hidden_dim, frozen_weights=False, bias=False):
         super().__init__()
@@ -107,9 +108,9 @@ class DebugModel(torch.nn.Module):
                 torch.nn.Linear(hidden_dim, hidden_dim, bias=bias),
             ]
         )
-#        self.act = torch.nn.ReLU()
+        #        self.act = torch.nn.ReLU()
         # self.cel = torch.nn.CrossEntropyLoss()
-     
+
         if frozen_weights:
             self.linears[0].weight.requires_grad = False
             self.linears[0].bias.requires_grad = False
@@ -117,8 +118,9 @@ class DebugModel(torch.nn.Module):
     def forward(self, x):
         for l in self.linears:
             x = l(x)
- #           x = self.act(x)
+        #           x = self.act(x)
         return x
+
 
 def create_grad_dict(grad, stats=["mean", "min", "max"]):
     grad_dict = {}
@@ -126,18 +128,23 @@ def create_grad_dict(grad, stats=["mean", "min", "max"]):
         grad_dict[stat] = getattr(torch, stat)(grad).item()
     return grad_dict
 
-def init_wandb(project="grads", group_name="test", name="tensor_fragment", entity=None):
-    wandb.login(key=os.getenv("WANDB_API_KEY"))
+
+def init_wandb(project="grads", group_name=None, job_type=None, name=None, entity=None):
+    # wandb.login(key=os.getenv("WANDB_API_KEY"))
+
     from wandb.sdk.wandb_run import Run
+
     run: Run = wandb.init(
-                project=project,
-                group=group_name,
-                name=name,
-                save_code=False,
-                force=False,
-                entity=entity,
-            )
+        project=project,
+        group=group_name,
+        name=name,
+        job_type=job_type,
+        save_code=False,
+        force=False,
+        entity=entity,
+    )
     return run
+
 
 def collect_grads(model, step, grad_types=["global"], flatten=True, debug=False):
     grad_dict = defaultdict(lambda: defaultdict(dict))
@@ -146,27 +153,37 @@ def collect_grads(model, step, grad_types=["global"], flatten=True, debug=False)
             #   param_dict = {}
             # if len(param) > 0:
             if debug:
-                log_rank_file(dist.get_rank(), f"step {step}: {param_name} {param.ds_summary()}")
-           
+                log_rank_file(
+                    dist.get_rank(), f"step {step}: {param_name} {param.ds_summary()}"
+                )
+
             if "global" in grad_types:
                 global_grads = safe_get_full_grad(param)
                 grad_dict[mod_name][param_name]["global"] = global_grads
-                
+
                 if debug:
-                    log_rank_file(dist.get_rank(), f"global_grads at step {step}: {param_name} {global_grads}")
-            
+                    log_rank_file(
+                        dist.get_rank(),
+                        f"global_grads at step {step}: {param_name} {global_grads}",
+                    )
+
             if "local" in grad_types:
                 local_grads = safe_get_local_grad(param)
                 grad_dict[mod_name][param_name]["local"] = local_grads
-    
-    return flatten_dict(grad_dict, parent_key=f"rank-{dist.get_rank()}") if flatten else grad_dict
 
-def flatten_dict(d, parent_key=None, sep='/'):
+    return (
+        flatten_dict(grad_dict, parent_key=f"rank-{dist.get_rank()}")
+        if flatten
+        else grad_dict
+    )
+
+
+def flatten_dict(d, parent_key=None, sep="/"):
     items = []
-    
+
     if parent_key is None:
         parent_key = f"rank-{dist.get_rank()}"
-    
+
     for k, v in d.items():
         new_key = f"{parent_key}{sep}{k}" if parent_key else k
         if isinstance(v, dict):
@@ -174,6 +191,7 @@ def flatten_dict(d, parent_key=None, sep='/'):
         else:
             items.append((new_key, v))
     return dict(items)
+
 
 def log_grads(grad_dict, step, use_wandb=True):
     if not use_wandb:
@@ -185,9 +203,21 @@ def log_grads(grad_dict, step, use_wandb=True):
         log_rank_file(rank, msg, log_path=f"rank-{rank}-grads.log")
     else:
         wandb.log(grad_dict)
-def log_histogram(grad_dict, step, num_bins=128, use_wandb=True, log_local=True, suffix="grad_hist"):
-    grad_hist = {k: wandb.Histogram(v.cpu(), num_bins=num_bins) for k, v in grad_dict.items()}
-    hist_data = {k: v.to_json() for k, v in grad_hist.items()}
+
+
+def log_histogram(
+    grad_dict, step, num_bins=128, use_wandb=True, log_local=True, suffix="grad_hist"
+):
+    grad_hist = {
+        k: wandb.Histogram(v.cpu(), num_bins=num_bins) for k, v in grad_dict.items()
+    }
+    # hist_data = {{k: v.to_json() for k, v in grad_hist.items()}}
+    hist_data = {}
+    for k, v in grad_hist.items():
+        hist_vals = v.to_json()
+        del hist_vals["_type"]
+        hist_data[k] = hist_vals
+
     if log_local:
         # grad_hist = {k: hist.to_json() for k, hist in grad_hist.items()}
         rank = dist.get_rank()
@@ -195,27 +225,39 @@ def log_histogram(grad_dict, step, num_bins=128, use_wandb=True, log_local=True,
         # keyed_grads = {key: grad_hist}  # {key: grad_dict}
         msg = json.dumps({step: hist_data}, indent=4)
         log_rank_file(rank, msg, log_path=f"rank-{rank}-{suffix}.log")
-    
+
     if use_wandb:
         wandb.log(grad_hist, step=step)
-        wandb.log(hist_data, step=step)
+        # wandb.log(hist_data, step=step)
+
 
 def get_grad_stats(flattened_grad_dict, stats=["mean", "median", "min", "max"]):
     grad_stats = {}
     for k, v in flattened_grad_dict.items():
-        grad_stats[k] = { stat: getattr(torch, stat)(v).cpu().item() for stat in stats}
+        grad_stats[k] = {stat: getattr(torch, stat)(v).cpu().item() for stat in stats}
     return grad_stats
-        
+
+
 def run_fragmented_model(
-    model, config_dict, hidden_dim, dtype, validate_after_bwd, validate_after_step
+    model,
+    config_dict,
+    hidden_dim,
+    dtype,
+    project="grads",
+    group_name=None,
+    job_type=None,
+    validate_after_bwd=None,
+    validate_after_step=None,
 ):
     model: deepspeed.DeepSpeedEngine
     model, _, _, _ = deepspeed.initialize(
         model=model, model_parameters=model.parameters(), config=config_dict
     )
     rank = dist.get_rank()
-    run = init_wandb(project="grads", group_name="debug", name=f"rank-{rank}")
 
+    init_wandb(
+        project=project, group_name=group_name, job_type=job_type, name=f"rank-{rank}"
+    )
 
     data_loader = random_dataloader(
         model=model,
@@ -223,31 +265,31 @@ def run_fragmented_model(
         hidden_dim=hidden_dim,
         device=model.device,
         dtype=dtype,
-        batch_size=5
+        batch_size=5,
     )
 
     dist.barrier()
     test_batch = next(iter(data_loader))
     y = model(test_batch[0])
     dy = torch.randn_like(y)
-    
+
     for n, batch in enumerate(data_loader):
         loss = model(batch[0])
         model.backward(loss.sum())
         grad_dict = collect_grads(model, step=n, grad_types=["global"])
         print(f"GRAD DICT at {n}: {grad_dict.keys()}")
 
-        log_histogram(grad_dict, step=n, num_bins=128, use_wandb=False, log_local=True)
-        # log_histogram(grad_dict, step=n, num_bins=128, use_wandb=False)
+        log_histogram(grad_dict, step=n, num_bins=128, use_wandb=True, log_local=True)
         # grad_stats = get_grad_stats(grad_dict)
         # log_grads(grad_stats, step=n, use_wandb=False)
         # log_grads(grad_stats, step=n, use_wandb=True)
-        validate_after_bwd(model)
+        # validate_after_bwd(model)
         model.step()
-        validate_after_step(model)
+        # validate_after_step(model)
 
     # Needed in ZeRO 3. Not doing so can give memory leak
     model.destroy()
+
 
 def get_named_parameters_by_module(model):
     module_param_dict = [
@@ -327,8 +369,11 @@ class TestTensorFragmentGet(DistributedTest):
             config_dict,
             hidden_dim,
             preferred_dtype(),
-            validate_after_bwd,
-            validate_after_step,
+            validate_after_bwd=validate_after_bwd,
+            validate_after_step=validate_after_step,
+            project="gradstats",
+            group_name="zero3",
+            job_type="debug"
         )
         # [{k: [n for n,p in v.named_parameters()]} for k,v in module.named_children()]
 
@@ -539,14 +584,14 @@ class TestTensorFragmentUpdate(DistributedTest):
         run_fragmented_model(
             model, config_dict, hidden_dim, dtype, lambda _: None, validate_func
         )
-        
+
 
 def test_wandb(project="grads", group_name="test", name="tensor_fragment", entity=None):
     run = init_wandb(project=project, group_name=group_name, name=name, entity=entity)
     hidden_dim = 128
     dtype = torch.float32
     model = DebugModel(128, False).to(device="cuda")
-    
+
     data_loader = random_dataloader(
         model=model,
         total_samples=5,
@@ -555,33 +600,34 @@ def test_wandb(project="grads", group_name="test", name="tensor_fragment", entit
         dtype=dtype,
         batch_size=1,
     )
-    
+
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
-    
+
     batch = next(iter(data_loader))
     x = batch[0]
     y = model(x)
     dy = torch.randn_like(y)
-    
+
     for n, batch in enumerate(data_loader):
         y = model(batch[0])
-        #model.backward(loss)
+        # model.backward(loss)
         y.backward(dy)
         grad_dict = collect_grads(model, stats=None)
-        flattened_grads = flatten_dict(grad_dict, parent_key = "rank0", sep="/")
+        flattened_grads = flatten_dict(grad_dict, parent_key="rank0", sep="/")
         grad_vals = {k: v.cpu() for k, v in flattened_grads.items()}
-        
+
         grad_hist = {k: wandb.Histogram(v, num_bins=128) for k, v in grad_vals.items()}
         # print(f"grad dict {n} = {json.dumps(grad_dict, indent=4)}")
-        # print(f"flattened grads {n} = {json.dumps(flattened_grads, indent=4)}")   
+        # print(f"flattened grads {n} = {json.dumps(flattened_grads, indent=4)}")
         json_hist = {k: v.to_json() for k, v in grad_hist.items()}
-        print(f"grad hist {n} = {json.dumps(json_hist, indent=4)}")     
+        print(f"grad hist {n} = {json.dumps(json_hist, indent=4)}")
         wandb.log(grad_hist, step=n)
         optimizer.step()
     run.finish()
     print(run.history())
     print(run.summary)
     print(run.config)
+
 
 if __name__ == "__main__":
     # test_wandb(group_name="clean", name="histogram")

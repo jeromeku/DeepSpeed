@@ -1,7 +1,13 @@
 # Copyright (c) Microsoft Corporation.
 # SPDX-License-Identifier: Apache-2.0
 
+import functools
+import inspect
+
 # DeepSpeed Team
+import os
+
+import deepspeed.comm as dist
 
 # For lazy import with printflock()
 fcntl = None
@@ -9,8 +15,47 @@ fcntl = None
 # for debug purposes map module and param objects to their fully qualified names
 module_names = {}
 param_names = {}
+DEEPSPEED_DEBUG = os.environ.get("DEEPSPEED_DEBUG", "0") == "1"
+
+def log_function_call(depth=3):
+    """Decorator to log the entire call stack tree up to a specified depth."""
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            # Get the name of the current function
+            should_print = dist.get_rank() == 0
+                
+                    # Print the function name and arguments
+            if should_print:
+                func_name = func.__name__
+
+                print(f"Function '{func_name}' called with:")
+                print(f"  args: {args}")
+                print(f"  kwargs: {kwargs}")
+                
+                # Get the entire call stack up to the specified depth
+                stack = inspect.stack()
+                max_depth = min(depth, len(stack) - 1)  # Ensure depth doesn't exceed stack size
+                
+                print(f"Call stack (up to depth {max_depth}):")
+                for i in range(1, max_depth + 1):
+                    caller_frame = stack[i]
+                    caller_name = caller_frame.function
+                    caller_filename = caller_frame.filename
+                    caller_lineno = caller_frame.lineno
+                    print(f"  [{i}] {caller_name} (from {caller_filename}:{caller_lineno})")
+                
+            # Execute the original function
+            return func(*args, **kwargs)
+        
+        return wrapper
 
 
+def set_conditional_breakpoint():
+    if DEEPSPEED_DEBUG:
+        import pdb
+        pdb.set_trace()
+        
 def debug_clear_module_and_param_names():
     global module_names
     global param_names

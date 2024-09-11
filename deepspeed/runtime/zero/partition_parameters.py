@@ -3,43 +3,52 @@
 
 # DeepSpeed Team
 
+import functools
+import itertools
+import logging
 import math
 import os
 import types
-from typing import Callable, Iterable
-from enum import Enum
-import functools
-import itertools
-from typing import List
 from collections import defaultdict
-import logging
+from enum import Enum
+from typing import Callable, Iterable, List
+
 import torch
 from torch import Tensor
-from deepspeed import comm as dist
-from torch.nn import Module
-from torch.nn import Parameter
+from torch.nn import Module, Parameter
 
-from .linear import zero3_linear_wrap
-
-from deepspeed.utils import groups
 import deepspeed
-from ..utils import see_memory_usage, get_only_unique_item
-from deepspeed.runtime.zero.config import DeepSpeedZeroConfig
-from deepspeed.runtime.zero.utils import assert_ints_same_as_other_ranks, is_zero_param
-from deepspeed.runtime.zero.offload_config import OffloadDeviceEnum
-from deepspeed.runtime.config_utils import get_config_default
-from deepspeed.utils import instrument_w_nvtx, logger
-from deepspeed.comm.comm import init_distributed
-from deepspeed.utils.debug import (debug_param2name_id_shape, debug_param2name_id_shape_device, debug_module2name,
-                                   debug_param2name_id, debug_param2name_id_shape_status)
+from deepspeed import comm as dist
 from deepspeed.accelerator import get_accelerator
+from deepspeed.comm.comm import init_distributed
+from deepspeed.inference.quantization.utils import (
+    WEIGHT_QUANTIZATION_LAYERS,
+    _quantize_param,
+    wrap_load_from_state_dict,
+    wrap_quantized_functional,
+)
+from deepspeed.runtime.config_utils import get_config_default
+from deepspeed.runtime.zero.config import DeepSpeedZeroConfig
+from deepspeed.runtime.zero.offload_config import OffloadDeviceEnum
+from deepspeed.runtime.zero.utils import assert_ints_same_as_other_ranks, is_zero_param
+from deepspeed.utils import groups, instrument_w_nvtx, logger
+from deepspeed.utils.debug import (
+    debug_module2name,
+    debug_param2name_id,
+    debug_param2name_id_shape,
+    debug_param2name_id_shape_device,
+    debug_param2name_id_shape_status,
+)
+
 from ..swap_tensor.partitioned_param_swapper import AsyncPartitionedParameterSwapper, PartitionedParamStatus
-from deepspeed.inference.quantization.utils import _quantize_param, WEIGHT_QUANTIZATION_LAYERS, wrap_quantized_functional, wrap_load_from_state_dict
+from ..utils import get_only_unique_item, see_memory_usage
+from .linear import zero3_linear_wrap
 
 partitioned_param_data_shape = [0]
 zero_init_context = 0
 top_level_context = None
 
+DEBUG = os.environ.get("DEEPSPEED_DEBUG", "0") == "1"
 
 class NoGatherHandle:
 
@@ -95,9 +104,10 @@ def _dist_allgather_fn(input_tensor: Tensor, output_tensor: Tensor, group=None):
     return instrument_w_nvtx(dist.allgather_fn)(output_tensor, input_tensor, group=group, async_op=True)
 
 
-def print_rank_0(message, debug=False, force=False):
+def print_rank_0(message, force=False):
+    should_print = force or DEBUG
     rank = dist.get_rank()
-    if rank == 0 and (debug or force):
+    if rank == 0 and should_print:
         print(message)
     # other variations
     # - print for all ranks w/o interleaving
@@ -1064,11 +1074,11 @@ class Init(InsertPostInitMethodToModuleSubClasses):
 
     def _post_init_method(self, module):
         #see_memory_usage(f"Before converting params in {module.__class__.__name__}", force=False)
-        print_rank_0(f'Converting Params in {module.__class__.__name__}', force=False)
+        print_rank_0(f'Converting Params in {module.__class__.__name__}')
         see_memory_usage(f"Before converting and partitioning params in {module.__class__.__name__}", force=False)
-
+        
         for name, param in module.named_parameters(recurse=False):
-            print_rank_0(f'Analyzing param {name} in {module.__class__.__name__}', force=False)
+            print_rank_0(f'Analyzing param {name} in {module.__class__.__name__}')
             InsertPostInitMethodToModuleSubClasses.num_module_parameters += 1
             InsertPostInitMethodToModuleSubClasses.num_module_elements += param.numel()
             if not is_zero_param(param):

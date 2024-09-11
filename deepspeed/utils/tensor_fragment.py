@@ -3,10 +3,11 @@
 
 # DeepSpeed Team
 
-import torch
 from dataclasses import dataclass
-from deepspeed import comm as dist
 from typing import Dict
+
+import torch
+from deepspeed import comm as dist
 
 
 @dataclass

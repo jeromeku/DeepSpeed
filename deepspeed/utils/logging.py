@@ -1,9 +1,10 @@
 # Copyright (c) Microsoft Corporation.
 # SPDX-License-Identifier: Apache-2.0
 
-# DeepSpeed Team
-
 import functools
+
+# DeepSpeed Team
+import inspect
 import logging
 import os
 import sys
@@ -86,6 +87,10 @@ def log_dist(message, ranks=None, level=logging.INFO):
         level (int)
 
     """
+    caller_frame = inspect.stack()[1]
+    caller_filename = caller_frame.filename
+    caller_lineno = caller_frame.lineno
+
     should_log = not dist.is_initialized()
     ranks = ranks or []
     my_rank = dist.get_rank() if dist.is_initialized() else -1
@@ -93,7 +98,7 @@ def log_dist(message, ranks=None, level=logging.INFO):
         should_log = ranks[0] == -1
         should_log = should_log or (my_rank in set(ranks))
     if should_log:
-        final_message = "[Rank {}] {}".format(my_rank, message)
+        final_message = "[Rank {}] {} (called from {}:{})".format(my_rank, message, caller_filename, caller_lineno)
         logger.log(level, final_message)
 
 

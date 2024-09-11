@@ -7,35 +7,40 @@ Copyright NVIDIA/Megatron
 
 Helper functions and classes from multiple sources.
 """
-
-from collections.abc import Iterable
-from deepspeed.moe.utils import is_moe_param
-import os
-import psutil
 import gc
+import inspect
+import os
+from collections.abc import Iterable
 from math import sqrt
 
+import psutil
 import torch
+
 from deepspeed import comm as dist
+from deepspeed.moe.utils import is_moe_param
+
 try:
     from torch._six import inf
 except ModuleNotFoundError:
     from torch import inf
 
-from deepspeed.utils import groups, logger
-from deepspeed.utils.bwc import (bwc_tensor_model_parallel_rank, bwc_pipeline_parallel_world_size,
-                                 bwc_pipeline_parallel_group)
-from deepspeed.runtime.constants import PIPE_REPLICATED
 from numpy import prod
-from deepspeed.accelerator import get_accelerator
-
-from deepspeed.module_inject.policy import transpose
 from torch.nn import functional as F
+
+from deepspeed.accelerator import get_accelerator
+from deepspeed.module_inject.policy import transpose
+from deepspeed.runtime.constants import PIPE_REPLICATED
+from deepspeed.utils import groups, logger
+from deepspeed.utils.bwc import (
+    bwc_pipeline_parallel_group,
+    bwc_pipeline_parallel_world_size,
+    bwc_tensor_model_parallel_rank,
+)
 
 torch_memory_reserved = get_accelerator().memory_reserved
 torch_max_memory_reserved = get_accelerator().max_memory_reserved
 
-
+DEBUG = os.environ.get("DEEPSPEED_DEBUG", "0") == "1"
 class DummyOptim():
     """
     Dummy optimizer presents model parameters as a param group, this is
@@ -100,8 +105,9 @@ def set_random_seed(seed):
     Args:
         seed (int): the seed to use
     """
-    import numpy
     import random
+
+    import numpy
     random.seed(seed)
     numpy.random.seed(seed)
     torch.manual_seed(seed)
@@ -769,7 +775,18 @@ def empty_cache():
 
 
 def see_memory_usage(message, force=False):
-    if not force:
+      # Get the current call stack
+    stack = inspect.stack()
+    
+    # Get the frame of the caller (index 1 in the stack)
+    caller_frame = stack[1]
+    
+    # Extract the filename and line number from the caller's frame
+    caller_file = caller_frame.filename
+    caller_lineno = caller_frame.lineno
+    
+    message =f"{caller_file}:{caller_lineno} -- {message}"
+    if not (force or DEBUG):
         return
     if dist.is_initialized() and not dist.get_rank() == 0:
         return

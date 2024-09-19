@@ -6,12 +6,42 @@
 import torch
 
 import deepspeed
+import deepspeed.comm as dist
 
 ###################################
 # Setup
 ###################################
 
 
+config_dict = {
+    "train_batch_size": 256,
+    "steps_per_print": 1,
+    "optimizer": {
+        "type": "Adam",
+        "params": {
+            "lr": 0.00015,
+        }
+    },
+    "fp16": {
+        "enabled": True,
+        "initial_scale_power": 8
+    },
+    "zero_optimization": {
+        "stage": 3,
+        # "reduce_bucket_size": 20,
+        # "zero_hpz_partition_size": 1,
+        # "reduce_scatter": True,
+        # "zero_quantized_weights": False,
+        # "zero_quantized_gradients": False
+    },
+    "comms_logger": {
+  "enabled": True,
+  "verbose": False,
+  "prof_all": True,
+  "debug": False
+}
+}
+#        "initial
 class VerboseLinear(torch.nn.Linear):
 
     def __init__(self, **kwargs):
@@ -28,7 +58,7 @@ class LinearStack(torch.nn.Module):
         self.output_dim = output_dim
         self.hidden_dim = hidden_dim
 
-        self.input_layer = VerboseLinear(in_features=self.input_dim, out_features=self.hidden_dim)
+        self.input_layer = torch.nn.Linear(in_features=self.input_dim, out_features=self.hidden_dim)
         self.layers = torch.nn.ModuleList([
             torch.nn.Linear(in_features=self.hidden_dim, out_features=self.hidden_dim, bias=False)
             for x in range(num_layers)

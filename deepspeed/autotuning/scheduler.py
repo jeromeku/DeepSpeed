@@ -3,22 +3,22 @@
 
 # DeepSpeed Team
 
+import base64
 import copy
-
 import json
+import os
 import subprocess
 import sys
 import threading
 import time
-import base64
 
-import os
 import hjson
 from tqdm import tqdm
 
 from ..utils import logger
 from .constants import AUTOTUNING, AUTOTUNING_METRIC_PATH, BUFSIZE
 from .utils import get_val_by_key, search_error, was_interruptted
+
 """
 thread-0: loop over experiment queue dispatching experiments if they become available
 thread-N: start each experiment in its own thread

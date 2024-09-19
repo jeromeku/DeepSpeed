@@ -3,12 +3,14 @@
 
 # DeepSpeed Team
 
-import os
-import json
 import argparse
+import json
+import os
+
 import torch
-import deepspeed
 from torch.utils.data.distributed import DistributedSampler
+
+import deepspeed
 import deepspeed.comm as dist
 
 
@@ -86,19 +88,25 @@ config_dict = {
         "initial_scale_power": 8
     },
     "zero_optimization": {
-        "stage": 0,
-        "reduce_bucket_size": 20,
-        "zero_hpz_partition_size": 1,
-        "reduce_scatter": True,
-        "zero_quantized_weights": False,
-        "zero_quantized_gradients": False
-    }
+        "stage": 3,
+        # "reduce_bucket_size": 20,
+        # "zero_hpz_partition_size": 1,
+        # "reduce_scatter": True,
+        # "zero_quantized_weights": False,
+        # "zero_quantized_gradients": False
+    },
+    "comms_logger": {
+  "enabled": True,
+  "verbose": False,
+  "prof_all": True,
+  "debug": False
+}
 }
 #        "initial_scale_power": 15
 args = get_args('/tmp/', config_dict)
 hidden_dim = 4 * 1024
 
-model = SimpleModel(hidden_dim, empty_grad=False)
+model = SimpleModel(hidden_dim, empty_grad=False).cuda()
 
 model, _, _, _ = deepspeed.initialize(args=args,
                                       model=model,
@@ -121,5 +129,6 @@ for n, batch in enumerate(data_loader):
         print("LOSS:", loss.item())
     model.backward(loss)
     model.step()
+    dist.log_summary(show_straggler=True)
     #print_params('step={}'.format(n), model)
     #if n == 5: break

@@ -4,6 +4,7 @@
 # DeepSpeed Team
 
 import math
+
 from deepspeed.utils import log_dist
 
 
@@ -67,7 +68,13 @@ def calc_bw_log(comm_op, size, duration):
 class CommsLogger:
 
     def __init__(self):
-        from deepspeed.comm.constants import COMMS_LOGGER_VERBOSE_DEFAULT, COMMS_LOGGER_DEBUG_DEFAULT, COMMS_LOGGER_PROF_OPS_DEFAULT, COMMS_LOGGER_PROF_ALL_DEFAULT, COMMS_LOGGER_ENABLED_DEFAULT
+        from deepspeed.comm.constants import (
+            COMMS_LOGGER_DEBUG_DEFAULT,
+            COMMS_LOGGER_ENABLED_DEFAULT,
+            COMMS_LOGGER_PROF_ALL_DEFAULT,
+            COMMS_LOGGER_PROF_OPS_DEFAULT,
+            COMMS_LOGGER_VERBOSE_DEFAULT,
+        )
         self.comms_dict = {}
         self.verbose = COMMS_LOGGER_VERBOSE_DEFAULT
         self.debug = COMMS_LOGGER_DEBUG_DEFAULT
@@ -125,9 +132,10 @@ class CommsLogger:
     # Print summary at end of iteration, epoch, or training
     def log_all(self, print_log=True, show_straggler=False):
         import torch
-        from deepspeed.utils.timer import trim_mean
+
         import deepspeed.comm as dist
         from deepspeed.comm.reduce_op import ReduceOp
+        from deepspeed.utils.timer import trim_mean
         if print_log:
             print(
                 f"{'Comm. Op': <20}{'Message Size': <20}{'Count': <20}{'Total Latency(ms)': <20}{'Avg Latency(ms)': <20}{'tput_avg (Gbps)': <20}{'busbw_avg (Gbps)': <20}"
@@ -165,8 +173,15 @@ class CommsLogger:
                     # vals[0] is the count for each msg size
                     count = vals[0]
                     # vals[1] is a list of latency records for each msg size
-                    lats = torch.tensor(vals[1])
-                    min_lats = torch.tensor(vals[1])
+                    lats = torch.tensor(vals[1], device="cuda")#device=vals[1][0].device)
+                    min_lats = torch.tensor(vals[1], device="cuda")
+                    # if dist.get_rank() == 0:
+                    #     print(f"lats: {dist.get_rank()} {torch.cuda.current_device()} {vals} {lats.shape} {lats.device}")
+                    #     dist.barrier()
+                    # else:
+                    #     dist.barrier()
+                    #     print(f"lats: {dist.get_rank()} {torch.cuda.current_device()} {vals} {lats.shape} {lats.device}")
+                    # dist.barrier()
                     dist.all_reduce(min_lats, op=ReduceOp.MIN)
                     total_lat = min_lats.sum().item()
                     total_straggler = (lats - min_lats).sum().item()
